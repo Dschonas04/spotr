@@ -51,6 +51,31 @@ class Speicher(ctx: Context) {
         get() = p.getInt("waechter", 5)
         set(v) = p.edit().putInt("waechter", v).apply()
 
+    var zuhauseAktiv: Boolean
+        get() = p.getBoolean("zuhause_aktiv", false)
+        set(v) = p.edit().putBoolean("zuhause_aktiv", v).apply()
+
+    var zuhauseLat: Double?
+        get() = p.getString("zuhause_lat", null)?.toDoubleOrNull()
+        set(v) = p.edit().putString("zuhause_lat", v?.toString()).apply()
+
+    var zuhauseLon: Double?
+        get() = p.getString("zuhause_lon", null)?.toDoubleOrNull()
+        set(v) = p.edit().putString("zuhause_lon", v?.toString()).apply()
+
+    /** Umkreis um die Wohnung in Metern. */
+    var zuhauseRadius: Int
+        get() = p.getInt("zuhause_radius", 200)
+        set(v) = p.edit().putInt("zuhause_radius", v).apply()
+
+    var zuhauseZuletzt: Boolean
+        get() = p.getBoolean("zuhause_zuletzt", false)
+        set(v) = p.edit().putBoolean("zuhause_zuletzt", v).apply()
+
+    var zuhauseStand: String
+        get() = p.getString("zuhause_stand", "Noch nicht gemessen")!!
+        set(v) = p.edit().putString("zuhause_stand", v).apply()
+
     val protokoll: List<String> get() = p.getString("protokoll", "")!!.lines().filter { it.isNotBlank() }
 
     fun notieren(text: String) {

@@ -47,18 +47,30 @@ object Planer {
     }
 
     /** Hauptarbeit: im Wecker, beim Start und nach jeder Änderung in der App. */
+    /** Zuhause aus gilt nur, wenn eine Wohnung gespeichert ist und Spotr ohnehin steuert. */
+    fun zuhauseZaehlt(sp: Speicher) = sp.zuhauseAktiv && sp.zuhauseLat != null && sp.betrieb != Betrieb.MANUELL
+
     fun pruefen(ctx: Context, grund: String) {
         val sp = Speicher(ctx)
-        val soll = soll(sp)
+        val grundSoll = soll(sp)
+        var soll = grundSoll
+        var warum = grund
+        if (grundSoll == true && zuhauseZaehlt(sp)) {
+            val vorher = sp.zuhauseZuletzt
+            val z = Ort.zuhause(ctx, sp)
+            if (z != null && z != vorher) sp.notieren(if (z) "zuhause angekommen" else "von zuhause weg")
+            if (z ?: vorher) { soll = false; warum = "zuhause" }
+        }
         if (soll != null) {
             val ist = Hotspot.istAn(ctx)
             if (soll != ist) {
                 val fehler = Hotspot.setzen(ctx, soll)
                 val was = if (soll) "eingeschaltet" else "ausgeschaltet"
-                sp.notieren(if (fehler == null) "$was ($grund)" else "nicht $was: $fehler ($grund)")
+                sp.notieren(if (fehler == null) "$was ($warum)" else "nicht $was: $fehler ($warum)")
             }
         }
-        planen(ctx, sp, soll)
+        // Zuhause muss der Wächter weiter nachsehen, sonst merkt er das Weggehen nicht.
+        planen(ctx, sp, if (grundSoll == true) true else soll)
     }
 
     private fun planen(ctx: Context, sp: Speicher, soll: Boolean?) {
@@ -116,6 +128,16 @@ class Steuerung : BroadcastReceiver() {
                 intent.getStringExtra("betrieb")?.let { b ->
                     runCatching { Betrieb.valueOf(b.uppercase()) }.getOrNull()?.let { sp.betrieb = it; sp.notieren("Betrieb: ${it.name.lowercase()} (adb)") }
                 }
+                if (intent.getBooleanExtra("zuhause_hier", false)) {
+                    val l = Ort.aktuell(ctx)
+                    if (l != null) {
+                        sp.zuhauseLat = l.latitude; sp.zuhauseLon = l.longitude; sp.zuhauseAktiv = true
+                        sp.notieren("Zuhause gespeichert (± ${l.accuracy.toInt()} m, adb)")
+                    } else {
+                        sp.notieren("Zuhause nicht gespeichert: kein Standort (adb)")
+                    }
+                }
+                if (intent.hasExtra("zuhause")) sp.zuhauseAktiv = intent.getBooleanExtra("zuhause", true)
                 if (intent.hasExtra("an")) {
                     val an = intent.getBooleanExtra("an", true)
                     val fehler = Hotspot.setzen(ctx, an)
@@ -125,7 +147,9 @@ class Steuerung : BroadcastReceiver() {
                 Planer.pruefen(ctx, "adb")
                 val an = Hotspot.istAn(ctx)
                 r.resultCode = if (an) 1 else 0
-                if (!intent.hasExtra("an")) r.resultData = (if (an) "an" else "aus") + (Hotspot.letzterFehler?.let { " ($it)" } ?: "")
+                if (!intent.hasExtra("an")) {
+                    r.resultData = (if (an) "an" else "aus") + (if (Planer.zuhauseZaehlt(sp)) ", ${sp.zuhauseStand}" else "")
+                }
             } finally { r.finish() }
         }.start()
     }

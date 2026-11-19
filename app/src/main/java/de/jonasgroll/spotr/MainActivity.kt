@@ -12,7 +12,9 @@ import android.os.PowerManager
 import android.os.Process
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -21,6 +23,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material.icons.filled.WifiTetheringOff
 import androidx.compose.material3.*
@@ -92,6 +95,9 @@ private fun Oberflaeche() {
     var rechte by remember { mutableStateOf(0) }
     var heute by remember { mutableStateOf<Long?>(null) }
     var monat by remember { mutableStateOf<Long?>(null) }
+    var zuhause by remember { mutableStateOf(sp.zuhauseAktiv) }
+    var ortSucht by remember { mutableStateOf(false) }
+    val ortFragen = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { rechte++ }
 
     fun auffrischen() {
         an = Hotspot.istAn(ctx)
@@ -147,7 +153,7 @@ private fun Oberflaeche() {
                                 Betrieb.MANUELL -> "Manuell"
                                 Betrieb.IMMER -> "Dauerbetrieb, der Wächter schaltet ihn wieder ein"
                                 Betrieb.ZEITPLAN -> if (soll == true) "Laut Zeitplan an" else "Laut Zeitplan aus"
-                            },
+                            } + if (soll == true && Planer.zuhauseZaehlt(sp) && sp.zuhauseZuletzt) ", aber du bist zuhause" else "",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -190,6 +196,8 @@ private fun Oberflaeche() {
                         if (!am.canScheduleExactAlarms()) "Wecker und Erinnerungen" to Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${ctx.packageName}")) else null,
                         if (!pm.isIgnoringBatteryOptimizations(ctx.packageName)) "Akku nicht optimieren" to Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${ctx.packageName}")) else null,
                         if (!darfNutzung(ctx)) "Nutzungsdaten (für den Verbrauch)" to Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS) else null,
+                        if (sp.zuhauseAktiv && !Ort.eingeschaltet(ctx)) "Standort einschalten (für Zuhause aus)" to Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS) else null,
+                        if (sp.zuhauseAktiv && Ort.darf(ctx) && !Ort.darfImHintergrund(ctx)) "Standort: „Immer zulassen“" to Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}")) else null,
                     )
                     if (fehlt.isNotEmpty()) {
                         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
@@ -229,6 +237,64 @@ private fun Oberflaeche() {
                                 onValueChange = { w = it },
                                 onValueChangeFinished = { sp.waechter = w.toInt(); anwenden() },
                             )
+                        }
+                    }
+                }
+            }
+
+            // ---------- Zuhause aus ----------
+            if (betrieb != Betrieb.MANUELL) {
+                item {
+                    key(rechte) {
+                        Card(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(16.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Filled.Home, null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Zuhause aus", fontWeight = FontWeight.SemiBold)
+                                        Text("Daheim bleibt der Hotspot aus, unterwegs geht er an", style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    Switch(checked = zuhause, onCheckedChange = {
+                                        zuhause = it; sp.zuhauseAktiv = it
+                                        sp.notieren(if (it) "Zuhause aus: an" else "Zuhause aus: aus")
+                                        if (it && !Ort.darf(ctx)) ortFragen.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))
+                                        anwenden()
+                                    })
+                                }
+                                if (zuhause) {
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(if (sp.zuhauseLat == null) "Noch keine Wohnung gespeichert" else sp.zuhauseStand, style = MaterialTheme.typography.bodyMedium)
+                                    Spacer(Modifier.height(6.dp))
+                                    OutlinedButton(enabled = !ortSucht, onClick = {
+                                        if (!Ort.darf(ctx)) {
+                                            ortFragen.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))
+                                            return@OutlinedButton
+                                        }
+                                        ortSucht = true
+                                        scope.launch(Dispatchers.IO) {
+                                            val l = Ort.aktuell(ctx)
+                                            if (l != null) {
+                                                sp.zuhauseLat = l.latitude; sp.zuhauseLon = l.longitude; sp.zuhauseZuletzt = true
+                                                sp.notieren("Zuhause gespeichert (± ${l.accuracy.toInt()} m)")
+                                            }
+                                            withContext(Dispatchers.Main) {
+                                                ortSucht = false
+                                                meldung = if (l == null) "Kein Standort. Ist der Standort eingeschaltet?" else null
+                                                anwenden()
+                                            }
+                                        }
+                                    }) { Text(if (ortSucht) "Suche Standort …" else "Ich bin jetzt zuhause") }
+                                    Spacer(Modifier.height(8.dp))
+                                    var r by remember { mutableFloatStateOf(sp.zuhauseRadius.toFloat()) }
+                                    Text("Umkreis ${r.toInt()} m", style = MaterialTheme.typography.bodySmall)
+                                    Slider(
+                                        value = r, valueRange = 100f..1000f, steps = 17,
+                                        onValueChange = { r = it },
+                                        onValueChangeFinished = { sp.zuhauseRadius = r.toInt(); anwenden() },
+                                    )
+                                }
+                            }
                         }
                     }
                 }
