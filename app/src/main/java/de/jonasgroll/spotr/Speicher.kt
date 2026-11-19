@@ -51,6 +51,11 @@ class Speicher(ctx: Context) {
         get() = p.getInt("waechter", 5)
         set(v) = p.edit().putInt("waechter", v).apply()
 
+    /** USB-Tethering von selbst, sobald ein Rechner per Kabel verbunden ist. */
+    var usbAuto: Boolean
+        get() = p.getBoolean("usb_auto", false)
+        set(v) = p.edit().putBoolean("usb_auto", v).apply()
+
     var zuhauseAktiv: Boolean
         get() = p.getBoolean("zuhause_aktiv", false)
         set(v) = p.edit().putBoolean("zuhause_aktiv", v).apply()

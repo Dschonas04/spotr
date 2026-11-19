@@ -69,6 +69,7 @@ object Planer {
                 sp.notieren(if (fehler == null) "$was ($warum)" else "nicht $was: $fehler ($warum)")
             }
         }
+        UsbDienst.abgleichen(ctx)
         // Zuhause muss der Wächter weiter nachsehen, sonst merkt er das Weggehen nicht.
         planen(ctx, sp, if (grundSoll == true) true else soll)
     }
@@ -137,6 +138,13 @@ class Steuerung : BroadcastReceiver() {
                         sp.notieren("Zuhause nicht gespeichert: kein Standort (adb)")
                     }
                 }
+                if (intent.hasExtra("usb_auto")) sp.usbAuto = intent.getBooleanExtra("usb_auto", true)
+                if (intent.hasExtra("usb")) {
+                    val u = intent.getBooleanExtra("usb", true)
+                    val f = Hotspot.setzen(ctx, u, Hotspot.USB)
+                    sp.notieren(if (f == null) (if (u) "USB-Tethering an (adb)" else "USB-Tethering aus (adb)") else "USB (adb): $f")
+                    r.resultData = f ?: "ok"
+                }
                 if (intent.hasExtra("zuhause")) sp.zuhauseAktiv = intent.getBooleanExtra("zuhause", true)
                 if (intent.hasExtra("an")) {
                     val an = intent.getBooleanExtra("an", true)
@@ -148,7 +156,8 @@ class Steuerung : BroadcastReceiver() {
                 val an = Hotspot.istAn(ctx)
                 r.resultCode = if (an) 1 else 0
                 if (!intent.hasExtra("an")) {
-                    r.resultData = (if (an) "an" else "aus") + (if (Planer.zuhauseZaehlt(sp)) ", ${sp.zuhauseStand}" else "")
+                    r.resultData = (if (an) "an" else "aus") + (if (Planer.zuhauseZaehlt(sp)) ", ${sp.zuhauseStand}" else "") +
+                        ", USB: " + (if (Hotspot.usbAn(ctx)) "an" else if (Hotspot.usbRechner(ctx)) "Rechner verbunden" else "kein Rechner")
                 }
             } finally { r.finish() }
         }.start()

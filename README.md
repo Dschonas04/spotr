@@ -5,6 +5,7 @@ Android-App, die das Handy zum reinen Hotspot macht. Läuft komplett auf dem Ger
 - Hotspot an/aus per Knopf oder Kachel in den Schnelleinstellungen
 - Betrieb: **Manuell**, **Immer an** (Wächter schaltet ihn wieder ein) oder **Zeitplan** (Zeitfenster je Wochentag, auch über Mitternacht)
 - **Zuhause aus**: im Umkreis der gespeicherten Wohnung bleibt der Hotspot aus, unterwegs geht er an (Standort über Funkzellen und WLAN-Suche, kein Dauer-GPS; zuhause ab Umkreis, unterwegs erst ab doppeltem Umkreis)
+- **USB-Tethering**: per Knopf oder automatisch, sobald ein Rechner am Kabel hängt (nicht zuhause, wenn „Zuhause aus“ an ist). Das S21 kann nur RNDIS: Windows und Linux ja, macOS nein (NCM per `tether_force_usb_functions` startet auf dem S21 nicht)
 - Startet nach dem Hochfahren von selbst
 - Mobile Daten heute und im Monat, Protokoll der Schaltvorgänge
 
@@ -28,6 +29,8 @@ Rechte einmalig (alternativ in der App antippen):
     adb shell am broadcast -f 0x20 -n de.jonasgroll.spotr/.Steuerung --es betrieb immer   # manuell|immer|zeitplan
     adb shell am broadcast -f 0x20 -n de.jonasgroll.spotr/.Steuerung --ez zuhause_hier true   # jetziger Ort = Zuhause
     adb shell am broadcast -f 0x20 -n de.jonasgroll.spotr/.Steuerung --ez zuhause false        # Zuhause aus abschalten
+    adb shell am broadcast -f 0x20 -n de.jonasgroll.spotr/.Steuerung --ez usb true            # USB-Tethering an
+    adb shell am broadcast -f 0x20 -n de.jonasgroll.spotr/.Steuerung --ez usb_auto true       # USB automatisch beim Einstecken
     adb shell am broadcast -f 0x20 -n de.jonasgroll.spotr/.Steuerung                 # Zustand: result=1 an, 0 aus
 
 Der Empfänger verlangt die Berechtigung DUMP, die nur System und adb-Shell haben.

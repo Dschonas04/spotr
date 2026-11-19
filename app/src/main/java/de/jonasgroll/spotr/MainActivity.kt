@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material.icons.filled.WifiTetheringOff
 import androidx.compose.material3.*
@@ -96,6 +97,9 @@ private fun Oberflaeche() {
     var heute by remember { mutableStateOf<Long?>(null) }
     var monat by remember { mutableStateOf<Long?>(null) }
     var zuhause by remember { mutableStateOf(sp.zuhauseAktiv) }
+    var usbAuto by remember { mutableStateOf(sp.usbAuto) }
+    var usbAn by remember { mutableStateOf(Hotspot.usbAn(ctx)) }
+    var usbRechner by remember { mutableStateOf(Hotspot.usbRechner(ctx)) }
     var ortSucht by remember { mutableStateOf(false) }
     val ortFragen = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { rechte++ }
 
@@ -119,7 +123,7 @@ private fun Oberflaeche() {
         onDispose { lebenszyklus.lifecycle.removeObserver(b) }
     }
     LaunchedEffect(Unit) {
-        while (true) { delay(3000); an = Hotspot.istAn(ctx) }
+        while (true) { delay(3000); an = Hotspot.istAn(ctx); usbAn = Hotspot.usbAn(ctx); usbRechner = Hotspot.usbRechner(ctx) }
     }
 
     Scaffold(topBar = { TopAppBar(title = { Text("Spotr", fontWeight = FontWeight.Bold) }) }) { innen ->
@@ -238,6 +242,55 @@ private fun Oberflaeche() {
                                 onValueChangeFinished = { sp.waechter = w.toInt(); anwenden() },
                             )
                         }
+                    }
+                }
+            }
+
+            // ---------- USB ----------
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.Usb, null)
+                            Spacer(Modifier.width(8.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("USB-Tethering", fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    when {
+                                        usbAn -> "An, der Rechner nutzt das Mobilfunknetz"
+                                        usbRechner -> "Rechner verbunden, Tethering aus"
+                                        else -> "Kein Rechner am Kabel"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                            OutlinedButton(enabled = usbRechner && !arbeitet, onClick = {
+                                arbeitet = true
+                                val ziel = !usbAn
+                                scope.launch(Dispatchers.IO) {
+                                    val f = Hotspot.setzen(ctx, ziel, Hotspot.USB)
+                                    sp.notieren(if (f == null) (if (ziel) "USB-Tethering an (App)" else "USB-Tethering aus (App)") else "USB: $f")
+                                    delay(1500)
+                                    withContext(Dispatchers.Main) { meldung = f; arbeitet = false; auffrischen(); usbAn = Hotspot.usbAn(ctx) }
+                                }
+                            }) { Text(if (usbAn) "Aus" else "An") }
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Automatisch beim Einstecken", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                            Switch(checked = usbAuto, onCheckedChange = {
+                                usbAuto = it; sp.usbAuto = it
+                                sp.notieren(if (it) "USB automatisch: an" else "USB automatisch: aus")
+                                if (it && android.os.Build.VERSION.SDK_INT >= 33) ortFragen.launch(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS))
+                                UsbDienst.abgleichen(ctx)
+                            })
+                        }
+                        Text(
+                            "Windows und Linux erkennen das sofort. Ein Mac nicht, das S21 spricht nur RNDIS." +
+                                if (zuhause) " Zuhause bleibt es aus." else "",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }

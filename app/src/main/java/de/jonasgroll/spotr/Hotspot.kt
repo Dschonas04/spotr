@@ -17,7 +17,8 @@ import java.util.concurrent.TimeUnit
  * die Kachel in den Schnelleinstellungen.
  */
 object Hotspot {
-    private const val TETHERING_WIFI = 0
+    const val WLAN = 0
+    const val USB = 1
 
     init {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) HiddenApiBypass.addHiddenApiExemptions("")
@@ -44,14 +45,14 @@ object Hotspot {
     }
 
     /** Ergebnis: null = erledigt, sonst die Fehlermeldung. Wartet höchstens 15 s. */
-    fun setzen(ctx: Context, an: Boolean): String? {
+    fun setzen(ctx: Context, an: Boolean, typ: Int = WLAN): String? {
         if (!darfSchalten(ctx)) return "Spotr darf die Systemeinstellungen nicht ändern"
         val tm = ctx.applicationContext.getSystemService("tethering")
             ?: return "Tethering wird nicht unterstützt"
         val klasse = Class.forName("android.net.TetheringManager")
         return try {
             if (!an) {
-                klasse.getMethod("stopTethering", Int::class.javaPrimitiveType).invoke(tm, TETHERING_WIFI)
+                klasse.getMethod("stopTethering", Int::class.javaPrimitiveType).invoke(tm, typ)
                 return null
             }
             val rueckruf = Class.forName("android.net.TetheringManager\$StartTetheringCallback")
@@ -69,7 +70,7 @@ object Hotspot {
             }
             val sofort = Executor { it.run() }
             klasse.getMethod("startTethering", Int::class.javaPrimitiveType, Executor::class.java, rueckruf)
-                .invoke(tm, TETHERING_WIFI, sofort, proxy)
+                .invoke(tm, typ, sofort, proxy)
             fertig.await(15, TimeUnit.SECONDS)
             fehler
         } catch (e: java.lang.reflect.InvocationTargetException) {
@@ -77,6 +78,26 @@ object Hotspot {
         } catch (e: Exception) {
             e.message ?: e.toString()
         }
+    }
+
+    /** Haftende Systemmeldung zum USB-Anschluss. */
+    private fun usbZustand(ctx: Context) = try {
+        ctx.applicationContext.registerReceiver(null, android.content.IntentFilter(USB_STATE), Context.RECEIVER_NOT_EXPORTED)
+    } catch (e: Exception) {
+        null
+    }
+
+    const val USB_STATE = "android.hardware.usb.action.USB_STATE"
+
+    /** Ein Rechner (nicht nur ein Ladegerät) hängt am USB-Anschluss. */
+    fun usbRechner(ctx: Context): Boolean {
+        val i = usbZustand(ctx) ?: return false
+        return i.getBooleanExtra("connected", false) && i.getBooleanExtra("configured", false)
+    }
+
+    fun usbAn(ctx: Context): Boolean {
+        val i = usbZustand(ctx) ?: return false
+        return i.getBooleanExtra("rndis", false) || i.getBooleanExtra("ncm", false)
     }
 
     private fun fehlertext(code: Int) = when (code) {
