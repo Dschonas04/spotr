@@ -19,37 +19,17 @@ object Planer {
     fun soll(sp: Speicher, jetzt: LocalDateTime = LocalDateTime.now()): Boolean? = when (sp.betrieb) {
         Betrieb.MANUELL -> null
         Betrieb.IMMER -> true
-        Betrieb.ZEITPLAN -> sp.fenster.any { drin(it, jetzt) }
+        Betrieb.ZEITPLAN -> Regeln.drin(sp.fenster, jetzt)
     }
 
-    fun drin(f: Fenster, jetzt: LocalDateTime): Boolean {
-        val tag = jetzt.dayOfWeek.value
-        val gestern = if (tag == 1) 7 else tag - 1
-        val m = jetzt.hour * 60 + jetzt.minute
-        return if (f.von <= f.bis) {
-            tag in f.tage && m >= f.von && m < f.bis
-        } else {
-            (tag in f.tage && m >= f.von) || (gestern in f.tage && m < f.bis)
-        }
-    }
+    private fun naechsteGrenze(sp: Speicher, jetzt: LocalDateTime): LocalDateTime? =
+        if (sp.betrieb == Betrieb.ZEITPLAN) Regeln.naechsteGrenze(sp.fenster, jetzt) else null
 
-    /** Nächster Zeitpunkt, an dem sich soll() ändern kann. */
-    private fun naechsteGrenze(sp: Speicher, jetzt: LocalDateTime): LocalDateTime? {
-        if (sp.betrieb != Betrieb.ZEITPLAN || sp.fenster.isEmpty()) return null
-        val basis = jetzt.withSecond(0).withNano(0)
-        val punkte = sp.fenster.flatMap { listOf(it.von, it.bis) }.toSet()
-        for (tag in 0..7) {
-            val d = basis.toLocalDate().plusDays(tag.toLong())
-            val kandidaten = punkte.map { d.atTime(it / 60, it % 60) }.filter { it.isAfter(jetzt) }.sorted()
-            if (kandidaten.isNotEmpty()) return kandidaten.first()
-        }
-        return null
-    }
-
-    /** Hauptarbeit: im Wecker, beim Start und nach jeder Änderung in der App. */
     /** Zuhause aus gilt nur, wenn eine Wohnung gespeichert ist und Spotr ohnehin steuert. */
     fun zuhauseZaehlt(sp: Speicher) = sp.zuhauseAktiv && sp.zuhauseLat != null && sp.betrieb != Betrieb.MANUELL
 
+    /** Hauptarbeit: im Wecker, beim Start und nach jeder Änderung in der App. Nie gleichzeitig. */
+    @Synchronized
     fun pruefen(ctx: Context, grund: String) {
         val sp = Speicher(ctx)
         val grundSoll = soll(sp)

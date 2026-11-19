@@ -38,7 +38,7 @@ class UsbDienst : Service() {
     private fun einschalten(ctx: Context) {
         val sp = Speicher(ctx)
         if (!sp.usbAuto) return
-        if (sp.zuhauseAktiv && sp.zuhauseLat != null && sp.zuhauseZuletzt) {
+        if (sp.zuhauseAktiv && sp.zuhauseLat != null && (Ort.zuhause(ctx, sp) ?: sp.zuhauseZuletzt)) {
             sp.notieren("USB-Rechner erkannt, zuhause: kein Tethering")
             return
         }
@@ -48,8 +48,7 @@ class UsbDienst : Service() {
         sp.notieren(if (f == null) "USB-Tethering an (Kabel)" else "USB-Tethering nicht an: $f")
     }
 
-    override fun onCreate() {
-        super.onCreate()
+    private fun vordergrund() {
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(KANAL, "USB-Tethering", NotificationManager.IMPORTANCE_MIN))
         val oeffnen = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
@@ -61,12 +60,20 @@ class UsbDienst : Service() {
             .setOngoing(true)
             .build()
         startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        vordergrund()
         // Haftende Meldung: der aktuelle Zustand kommt sofort, ein schon
         // steckender Rechner wird also auch erkannt.
         registerReceiver(empfaenger, IntentFilter(Hotspot.USB_STATE), RECEIVER_NOT_EXPORTED)
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int) = START_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        vordergrund()
+        return START_STICKY
+    }
 
     override fun onDestroy() {
         runCatching { unregisterReceiver(empfaenger) }

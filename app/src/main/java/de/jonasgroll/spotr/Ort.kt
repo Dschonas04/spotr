@@ -58,14 +58,9 @@ object Ort {
         val lat = sp.zuhauseLat ?: return null
         val lon = sp.zuhauseLon ?: return null
         val l = aktuell(ctx) ?: return null.also { sp.zuhauseStand = "Standort nicht verfügbar" }
-        if (l.accuracy > 1500) return null.also { sp.zuhauseStand = "Standort zu ungenau (${l.accuracy.toInt()} m)" }
         val abstand = FloatArray(1).also { Location.distanceBetween(lat, lon, l.latitude, l.longitude, it) }[0]
-        val r = sp.zuhauseRadius.toFloat()
-        val z = when {
-            abstand <= maxOf(r, l.accuracy) -> true
-            abstand > 2 * r + l.accuracy -> false
-            else -> sp.zuhauseZuletzt
-        }
+        val z = Regeln.zuhause(abstand, l.accuracy, sp.zuhauseRadius.toFloat(), sp.zuhauseZuletzt)
+            ?: return null.also { sp.zuhauseStand = "Standort zu ungenau (${l.accuracy.toInt()} m)" }
         sp.zuhauseZuletzt = z
         sp.zuhauseStand = (if (z) "Zuhause" else "Unterwegs") + ", ${abstand.toInt()} m entfernt (± ${l.accuracy.toInt()} m)"
         return z

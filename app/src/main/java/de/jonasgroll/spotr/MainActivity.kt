@@ -14,17 +14,16 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Usb
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material.icons.filled.WifiTetheringOff
 import androidx.compose.material3.*
@@ -38,8 +37,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -80,6 +79,24 @@ private fun darfNutzung(ctx: Context): Boolean {
     return ao.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), ctx.packageName) == AppOpsManager.MODE_ALLOWED
 }
 
+private val WAECHTER = listOf(1, 5, 10, 15, 30)
+
+/** Eine Zeile der Einstellungsliste: Titel, Unterzeile, rechts ein Schalter oder Text. */
+@Composable
+private fun Zeile(titel: String, unter: String? = null, klick: (() -> Unit)? = null, rechts: @Composable () -> Unit = {}) {
+    Row(
+        Modifier.fillMaxWidth().then(if (klick != null) Modifier.clickable(onClick = klick) else Modifier)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(titel, style = MaterialTheme.typography.bodyLarge)
+            if (unter != null) Text(unter, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        rechts()
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun Oberflaeche() {
@@ -87,24 +104,31 @@ private fun Oberflaeche() {
     val sp = remember { Speicher(ctx) }
     val scope = rememberCoroutineScope()
     var an by remember { mutableStateOf(Hotspot.istAn(ctx)) }
+    var usbAn by remember { mutableStateOf(Hotspot.usbAn(ctx)) }
+    var usbRechner by remember { mutableStateOf(Hotspot.usbRechner(ctx)) }
     var betrieb by remember { mutableStateOf(sp.betrieb) }
     var fenster by remember { mutableStateOf(sp.fenster) }
     var protokoll by remember { mutableStateOf(sp.protokoll) }
-    var meldung by remember { mutableStateOf<String?>(null) }
-    var arbeitet by remember { mutableStateOf(false) }
-    var neuesFenster by remember { mutableStateOf(false) }
-    var rechte by remember { mutableStateOf(0) }
-    var heute by remember { mutableStateOf<Long?>(null) }
-    var monat by remember { mutableStateOf<Long?>(null) }
     var zuhause by remember { mutableStateOf(sp.zuhauseAktiv) }
     var usbAuto by remember { mutableStateOf(sp.usbAuto) }
-    var usbAn by remember { mutableStateOf(Hotspot.usbAn(ctx)) }
-    var usbRechner by remember { mutableStateOf(Hotspot.usbRechner(ctx)) }
+    var waechter by remember { mutableIntStateOf(sp.waechter) }
+    var radius by remember { mutableIntStateOf(sp.zuhauseRadius) }
+    var meldung by remember { mutableStateOf<String?>(null) }
+    var arbeitet by remember { mutableStateOf(false) }
     var ortSucht by remember { mutableStateOf(false) }
-    val ortFragen = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { rechte++ }
+    var neuesFenster by remember { mutableStateOf(false) }
+    var zuhauseOffen by remember { mutableStateOf(false) }
+    var alleEintraege by remember { mutableStateOf(false) }
+    var rechte by remember { mutableIntStateOf(0) }
+    var heute by remember { mutableStateOf<Long?>(null) }
+    var monat by remember { mutableStateOf<Long?>(null) }
+    val fragen = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { rechte++ }
+    val ortRechte = arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION)
 
     fun auffrischen() {
         an = Hotspot.istAn(ctx)
+        usbAn = Hotspot.usbAn(ctx)
+        usbRechner = Hotspot.usbRechner(ctx)
         protokoll = sp.protokoll
         heute = verbrauch(ctx, LocalDate.now())
         monat = verbrauch(ctx, LocalDate.now().withDayOfMonth(1))
@@ -116,6 +140,23 @@ private fun Oberflaeche() {
         withContext(Dispatchers.Main) { auffrischen() }
     }
 
+    fun schalten(ziel: Boolean, typ: Int) {
+        arbeitet = true
+        scope.launch(Dispatchers.IO) {
+            val f = Hotspot.setzen(ctx, ziel, typ)
+            val name = if (typ == Hotspot.USB) "USB-Tethering" else "Hotspot"
+            sp.notieren(if (f == null) "$name ${if (ziel) "an" else "aus"} (App)" else "$name: $f")
+            delay(1500)
+            withContext(Dispatchers.Main) {
+                meldung = f ?: if (typ == Hotspot.WLAN && betrieb != Betrieb.MANUELL && Planer.soll(sp) != ziel) {
+                    "Der Betrieb stellt das beim nächsten Prüfen zurück"
+                } else null
+                arbeitet = false
+                auffrischen()
+            }
+        }
+    }
+
     val lebenszyklus = LocalLifecycleOwner.current
     DisposableEffect(lebenszyklus) {
         val b = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_RESUME) { auffrischen(); anwenden() } }
@@ -123,93 +164,89 @@ private fun Oberflaeche() {
         onDispose { lebenszyklus.lifecycle.removeObserver(b) }
     }
     LaunchedEffect(Unit) {
-        while (true) { delay(3000); an = Hotspot.istAn(ctx); usbAn = Hotspot.usbAn(ctx); usbRechner = Hotspot.usbRechner(ctx) }
+        while (true) {
+            delay(3000)
+            an = Hotspot.istAn(ctx); usbAn = Hotspot.usbAn(ctx); usbRechner = Hotspot.usbRechner(ctx); protokoll = sp.protokoll
+        }
     }
 
     Scaffold(topBar = { TopAppBar(title = { Text("Spotr", fontWeight = FontWeight.Bold) }) }) { innen ->
         LazyColumn(
             Modifier.padding(innen).fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             // ---------- Zustand ----------
             item {
                 Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(20.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Surface(
                             shape = CircleShape,
                             color = if (an) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier.size(96.dp),
+                            modifier = Modifier.size(56.dp),
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     if (an) Icons.Filled.WifiTethering else Icons.Filled.WifiTetheringOff, null,
-                                    Modifier.size(52.dp),
                                     tint = if (an) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                         }
-                        Spacer(Modifier.height(12.dp))
-                        Text(if (an) "Hotspot läuft" else "Hotspot aus", fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
-                        val soll = Planer.soll(sp)
-                        Text(
-                            when (betrieb) {
-                                Betrieb.MANUELL -> "Manuell"
-                                Betrieb.IMMER -> "Dauerbetrieb, der Wächter schaltet ihn wieder ein"
-                                Betrieb.ZEITPLAN -> if (soll == true) "Laut Zeitplan an" else "Laut Zeitplan aus"
-                            } + if (soll == true && Planer.zuhauseZaehlt(sp) && sp.zuhauseZuletzt) ", aber du bist zuhause" else "",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(Modifier.height(14.dp))
-                        Button(
-                            enabled = !arbeitet,
-                            onClick = {
-                                arbeitet = true
-                                val ziel = !an
-                                scope.launch(Dispatchers.IO) {
-                                    val f = Hotspot.setzen(ctx, ziel)
-                                    sp.notieren(if (f == null) (if (ziel) "eingeschaltet (App)" else "ausgeschaltet (App)") else "App: $f")
-                                    delay(1200)
-                                    withContext(Dispatchers.Main) {
-                                        meldung = f
-                                        if (f == null && betrieb != Betrieb.MANUELL && Planer.soll(sp) != ziel) {
-                                            meldung = "Hinweis: Der Betrieb „${betrieb.name.lowercase()}“ stellt das beim nächsten Prüfen zurück."
-                                        }
-                                        arbeitet = false
-                                        auffrischen()
-                                    }
-                                }
-                            },
-                        ) { Text(if (an) "Ausschalten" else "Einschalten") }
-                        meldung?.let {
-                            Spacer(Modifier.height(8.dp))
-                            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(if (an) "Hotspot an" else "Hotspot aus", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                            val soll = Planer.soll(sp)
+                            val grund = when {
+                                betrieb == Betrieb.MANUELL -> "Manuell"
+                                soll == true && Planer.zuhauseZaehlt(sp) && sp.zuhauseZuletzt -> "Du bist zuhause"
+                                betrieb == Betrieb.IMMER -> "Immer an"
+                                soll == true -> "Laut Zeitplan an"
+                                else -> "Laut Zeitplan aus"
+                            }
+                            Text(grund, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
+                        Switch(checked = an, enabled = !arbeitet, onCheckedChange = { schalten(it, Hotspot.WLAN) })
+                    }
+                    HorizontalDivider()
+                    Zeile(
+                        "USB-Tethering",
+                        when {
+                            usbAn -> "An"
+                            usbRechner -> "Rechner verbunden"
+                            else -> "Kein Rechner am Kabel"
+                        },
+                    ) {
+                        Switch(checked = usbAn, enabled = (usbRechner || usbAn) && !arbeitet, onCheckedChange = { schalten(it, Hotspot.USB) })
+                    }
+                    if (heute != null) {
+                        HorizontalDivider()
+                        Zeile("Mobile Daten", "Heute ${mb(heute!!)}, diesen Monat ${mb(monat ?: 0)}")
+                    }
+                    meldung?.let {
+                        Text(it, Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
 
-            // ---------- Rechte ----------
+            // ---------- Fehlende Rechte ----------
             item {
                 key(rechte) {
                     val am = ctx.getSystemService(AlarmManager::class.java)
                     val pm = ctx.getSystemService(PowerManager::class.java)
+                    val paket = Uri.parse("package:${ctx.packageName}")
                     val fehlt = listOfNotNull(
-                        if (!Hotspot.darfSchalten(ctx)) "Systemeinstellungen ändern" to Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:${ctx.packageName}")) else null,
-                        if (!am.canScheduleExactAlarms()) "Wecker und Erinnerungen" to Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${ctx.packageName}")) else null,
-                        if (!pm.isIgnoringBatteryOptimizations(ctx.packageName)) "Akku nicht optimieren" to Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${ctx.packageName}")) else null,
+                        if (!Hotspot.darfSchalten(ctx)) "Systemeinstellungen ändern" to Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, paket) else null,
+                        if (!am.canScheduleExactAlarms()) "Wecker und Erinnerungen" to Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, paket) else null,
+                        if (!pm.isIgnoringBatteryOptimizations(ctx.packageName)) "Akku nicht optimieren" to Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, paket) else null,
                         if (!darfNutzung(ctx)) "Nutzungsdaten (für den Verbrauch)" to Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS) else null,
-                        if (sp.zuhauseAktiv && !Ort.eingeschaltet(ctx)) "Standort einschalten (für Zuhause aus)" to Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS) else null,
-                        if (sp.zuhauseAktiv && Ort.darf(ctx) && !Ort.darfImHintergrund(ctx)) "Standort: „Immer zulassen“" to Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}")) else null,
+                        if (zuhause && !Ort.eingeschaltet(ctx)) "Standort einschalten" to Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS) else null,
+                        if (zuhause && Ort.darf(ctx) && !Ort.darfImHintergrund(ctx)) "Standort: „Immer zulassen“" to Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, paket) else null,
                     )
                     if (fehlt.isNotEmpty()) {
-                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
-                            Column(Modifier.padding(16.dp).fillMaxWidth()) {
-                                Text("Spotr braucht noch", fontWeight = FontWeight.SemiBold)
-                                fehlt.forEach { (name, intent) ->
-                                    TextButton(onClick = { ctx.startActivity(intent) }) { Text("→ $name") }
-                                }
+                        Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                            Column(Modifier.padding(vertical = 8.dp)) {
+                                Text("Spotr braucht noch", Modifier.padding(horizontal = 16.dp), fontWeight = FontWeight.SemiBold)
+                                fehlt.forEach { (name, intent) -> Zeile(name, klick = { ctx.startActivity(intent) }) }
                             }
                         }
                     }
@@ -218,137 +255,14 @@ private fun Oberflaeche() {
 
             // ---------- Betrieb ----------
             item {
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("Betrieb", fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.height(8.dp))
-                        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                            val namen = listOf(Betrieb.MANUELL to "Manuell", Betrieb.IMMER to "Immer an", Betrieb.ZEITPLAN to "Zeitplan")
-                            namen.forEachIndexed { i, (b, n) ->
-                                SegmentedButton(
-                                    selected = betrieb == b,
-                                    onClick = { betrieb = b; sp.betrieb = b; sp.notieren("Betrieb: $n"); anwenden() },
-                                    shape = SegmentedButtonDefaults.itemShape(i, namen.size),
-                                ) { Text(n) }
-                            }
-                        }
-                        if (betrieb != Betrieb.MANUELL) {
-                            Spacer(Modifier.height(12.dp))
-                            Text("Wächter prüft alle ${sp.waechter} Minuten", style = MaterialTheme.typography.bodySmall)
-                            var w by remember { mutableFloatStateOf(sp.waechter.toFloat()) }
-                            Slider(
-                                value = w, valueRange = 1f..30f, steps = 28,
-                                onValueChange = { w = it },
-                                onValueChangeFinished = { sp.waechter = w.toInt(); anwenden() },
-                            )
-                        }
-                    }
-                }
-            }
-
-            // ---------- USB ----------
-            item {
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.Usb, null)
-                            Spacer(Modifier.width(8.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text("USB-Tethering", fontWeight = FontWeight.SemiBold)
-                                Text(
-                                    when {
-                                        usbAn -> "An, der Rechner nutzt das Mobilfunknetz"
-                                        usbRechner -> "Rechner verbunden, Tethering aus"
-                                        else -> "Kein Rechner am Kabel"
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                            }
-                            OutlinedButton(enabled = usbRechner && !arbeitet, onClick = {
-                                arbeitet = true
-                                val ziel = !usbAn
-                                scope.launch(Dispatchers.IO) {
-                                    val f = Hotspot.setzen(ctx, ziel, Hotspot.USB)
-                                    sp.notieren(if (f == null) (if (ziel) "USB-Tethering an (App)" else "USB-Tethering aus (App)") else "USB: $f")
-                                    delay(1500)
-                                    withContext(Dispatchers.Main) { meldung = f; arbeitet = false; auffrischen(); usbAn = Hotspot.usbAn(ctx) }
-                                }
-                            }) { Text(if (usbAn) "Aus" else "An") }
-                        }
-                        Spacer(Modifier.height(6.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Automatisch beim Einstecken", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                            Switch(checked = usbAuto, onCheckedChange = {
-                                usbAuto = it; sp.usbAuto = it
-                                sp.notieren(if (it) "USB automatisch: an" else "USB automatisch: aus")
-                                if (it && android.os.Build.VERSION.SDK_INT >= 33) ortFragen.launch(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS))
-                                UsbDienst.abgleichen(ctx)
-                            })
-                        }
-                        Text(
-                            "Windows und Linux erkennen das sofort. Ein Mac nicht, das S21 spricht nur RNDIS." +
-                                if (zuhause) " Zuhause bleibt es aus." else "",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-
-            // ---------- Zuhause aus ----------
-            if (betrieb != Betrieb.MANUELL) {
-                item {
-                    key(rechte) {
-                        Card(Modifier.fillMaxWidth()) {
-                            Column(Modifier.padding(16.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Filled.Home, null)
-                                    Spacer(Modifier.width(8.dp))
-                                    Column(Modifier.weight(1f)) {
-                                        Text("Zuhause aus", fontWeight = FontWeight.SemiBold)
-                                        Text("Daheim bleibt der Hotspot aus, unterwegs geht er an", style = MaterialTheme.typography.bodySmall)
-                                    }
-                                    Switch(checked = zuhause, onCheckedChange = {
-                                        zuhause = it; sp.zuhauseAktiv = it
-                                        sp.notieren(if (it) "Zuhause aus: an" else "Zuhause aus: aus")
-                                        if (it && !Ort.darf(ctx)) ortFragen.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))
-                                        anwenden()
-                                    })
-                                }
-                                if (zuhause) {
-                                    Spacer(Modifier.height(8.dp))
-                                    Text(if (sp.zuhauseLat == null) "Noch keine Wohnung gespeichert" else sp.zuhauseStand, style = MaterialTheme.typography.bodyMedium)
-                                    Spacer(Modifier.height(6.dp))
-                                    OutlinedButton(enabled = !ortSucht, onClick = {
-                                        if (!Ort.darf(ctx)) {
-                                            ortFragen.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))
-                                            return@OutlinedButton
-                                        }
-                                        ortSucht = true
-                                        scope.launch(Dispatchers.IO) {
-                                            val l = Ort.aktuell(ctx)
-                                            if (l != null) {
-                                                sp.zuhauseLat = l.latitude; sp.zuhauseLon = l.longitude; sp.zuhauseZuletzt = true
-                                                sp.notieren("Zuhause gespeichert (± ${l.accuracy.toInt()} m)")
-                                            }
-                                            withContext(Dispatchers.Main) {
-                                                ortSucht = false
-                                                meldung = if (l == null) "Kein Standort. Ist der Standort eingeschaltet?" else null
-                                                anwenden()
-                                            }
-                                        }
-                                    }) { Text(if (ortSucht) "Suche Standort …" else "Ich bin jetzt zuhause") }
-                                    Spacer(Modifier.height(8.dp))
-                                    var r by remember { mutableFloatStateOf(sp.zuhauseRadius.toFloat()) }
-                                    Text("Umkreis ${r.toInt()} m", style = MaterialTheme.typography.bodySmall)
-                                    Slider(
-                                        value = r, valueRange = 100f..1000f, steps = 17,
-                                        onValueChange = { r = it },
-                                        onValueChangeFinished = { sp.zuhauseRadius = r.toInt(); anwenden() },
-                                    )
-                                }
-                            }
-                        }
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    val namen = listOf(Betrieb.MANUELL to "Manuell", Betrieb.IMMER to "Immer an", Betrieb.ZEITPLAN to "Zeitplan")
+                    namen.forEachIndexed { i, (b, n) ->
+                        SegmentedButton(
+                            selected = betrieb == b,
+                            onClick = { betrieb = b; sp.betrieb = b; sp.notieren("Betrieb: $n"); anwenden() },
+                            shape = SegmentedButtonDefaults.itemShape(i, namen.size),
+                        ) { Text(n) }
                     }
                 }
             }
@@ -356,51 +270,99 @@ private fun Oberflaeche() {
             // ---------- Zeitplan ----------
             if (betrieb == Betrieb.ZEITPLAN) {
                 item {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Zeitplan", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                        FilledTonalButton(onClick = { neuesFenster = true }) {
-                            Icon(Icons.Filled.Add, null); Spacer(Modifier.width(4.dp)); Text("Zeitfenster")
-                        }
-                    }
-                    if (fenster.isEmpty()) {
-                        Text("Noch kein Zeitfenster. Außerhalb aller Fenster bleibt der Hotspot aus.", style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-                items(fenster) { f ->
                     Card(Modifier.fillMaxWidth()) {
-                        Row(Modifier.padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(f.text(), Modifier.weight(1f))
-                            IconButton(onClick = {
-                                fenster = fenster - f; sp.fenster = fenster; sp.notieren("Zeitfenster gelöscht: ${f.text()}"); anwenden()
-                            }) { Icon(Icons.Filled.Delete, "Löschen") }
+                        if (fenster.isEmpty()) {
+                            Zeile("Noch kein Zeitfenster", "Außerhalb aller Fenster bleibt der Hotspot aus")
+                        }
+                        fenster.forEach { f ->
+                            Zeile(f.text()) {
+                                IconButton(onClick = {
+                                    fenster = fenster - f; sp.fenster = fenster; sp.notieren("Zeitfenster gelöscht: ${f.text()}"); anwenden()
+                                }) { Icon(Icons.Filled.Close, "Löschen") }
+                            }
+                            HorizontalDivider()
+                        }
+                        TextButton(onClick = { neuesFenster = true }, modifier = Modifier.padding(horizontal = 8.dp)) {
+                            Icon(Icons.Filled.Add, null); Spacer(Modifier.width(6.dp)); Text("Zeitfenster")
                         }
                     }
                 }
             }
 
-            // ---------- Verbrauch ----------
+            // ---------- Einstellungen ----------
             item {
                 Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("Mobile Daten", fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.height(6.dp))
-                        if (heute == null) {
-                            Text("Ohne „Nutzungsdaten“ nicht verfügbar", style = MaterialTheme.typography.bodySmall)
-                        } else {
-                            Row {
-                                Column(Modifier.weight(1f)) { Text("Heute", style = MaterialTheme.typography.bodySmall); Text(mb(heute!!), fontSize = 20.sp) }
-                                Column(Modifier.weight(1f)) { Text("Diesen Monat", style = MaterialTheme.typography.bodySmall); Text(mb(monat ?: 0), fontSize = 20.sp) }
+                    if (betrieb != Betrieb.MANUELL) {
+                        Zeile(
+                            "Zuhause aus",
+                            if (!zuhause) "Daheim bleibt der Hotspot aus" else if (sp.zuhauseLat == null) "Noch kein Ort gespeichert" else sp.zuhauseStand,
+                            klick = { if (zuhause) zuhauseOffen = !zuhauseOffen },
+                        ) {
+                            Switch(checked = zuhause, onCheckedChange = {
+                                zuhause = it; sp.zuhauseAktiv = it; zuhauseOffen = it
+                                sp.notieren("Zuhause aus: ${if (it) "an" else "aus"}")
+                                if (it && !Ort.darf(ctx)) fragen.launch(ortRechte)
+                                anwenden()
+                            })
+                        }
+                        if (zuhause && zuhauseOffen) {
+                            Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 12.dp)) {
+                                OutlinedButton(enabled = !ortSucht, onClick = {
+                                    if (!Ort.darf(ctx)) { fragen.launch(ortRechte); return@OutlinedButton }
+                                    ortSucht = true
+                                    scope.launch(Dispatchers.IO) {
+                                        val l = Ort.aktuell(ctx)
+                                        if (l != null) {
+                                            sp.zuhauseLat = l.latitude; sp.zuhauseLon = l.longitude; sp.zuhauseZuletzt = true
+                                            sp.notieren("Zuhause gespeichert (± ${l.accuracy.toInt()} m)")
+                                        }
+                                        withContext(Dispatchers.Main) {
+                                            ortSucht = false
+                                            meldung = if (l == null) "Kein Standort. Ist der Standort eingeschaltet?" else null
+                                            anwenden()
+                                        }
+                                    }
+                                }) { Text(if (ortSucht) "Suche Standort …" else "Ich bin jetzt zuhause") }
+                                Spacer(Modifier.height(8.dp))
+                                Text("Umkreis", style = MaterialTheme.typography.bodySmall)
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    listOf(100, 200, 500, 1000).forEach { r ->
+                                        FilterChip(selected = radius == r, onClick = { radius = r; sp.zuhauseRadius = r; anwenden() }, label = { Text("$r m") })
+                                    }
+                                }
                             }
                         }
+                        HorizontalDivider()
+                    }
+                    Zeile("USB automatisch", "Tethering, sobald ein Rechner am Kabel hängt") {
+                        Switch(checked = usbAuto, onCheckedChange = {
+                            usbAuto = it; sp.usbAuto = it
+                            sp.notieren("USB automatisch: ${if (it) "an" else "aus"}")
+                            if (it && android.os.Build.VERSION.SDK_INT >= 33) fragen.launch(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS))
+                            UsbDienst.abgleichen(ctx)
+                        })
+                    }
+                    if (betrieb != Betrieb.MANUELL) {
+                        HorizontalDivider()
+                        Zeile("Prüfen alle $waechter Minuten", "Antippen zum Ändern", klick = {
+                            waechter = WAECHTER[(WAECHTER.indexOf(waechter) + 1) % WAECHTER.size]
+                            sp.waechter = waechter; anwenden()
+                        })
                     }
                 }
             }
 
             // ---------- Protokoll ----------
-            item { Text("Protokoll", fontWeight = FontWeight.SemiBold) }
-            items(protokoll.take(30)) { z ->
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Protokoll", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    if (protokoll.size > 5) TextButton(onClick = { alleEintraege = !alleEintraege }) { Text(if (alleEintraege) "Weniger" else "Alle") }
+                }
+            }
+            items(if (alleEintraege) protokoll else protokoll.take(5)) { z ->
                 Text(z, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            item { Spacer(Modifier.height(24.dp)) }
         }
     }
 
