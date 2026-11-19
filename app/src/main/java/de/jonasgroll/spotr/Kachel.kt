@@ -7,7 +7,12 @@ import android.service.quicksettings.TileService
 class Kachel : TileService() {
     override fun onStartListening() = zeigen(Hotspot.istAn(this))
 
+    // Vom Sperrbildschirm aus erst entsperren, sonst könnte jeder mit dem Handy in der Hand schalten.
     override fun onClick() {
+        if (isLocked && isSecure) unlockAndRun { schalten() } else schalten()
+    }
+
+    private fun schalten() {
         val an = !Hotspot.istAn(this)
         zeigen(an)
         Thread {
