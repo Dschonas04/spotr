@@ -5,6 +5,7 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
 
@@ -33,6 +34,18 @@ object Planer {
     fun pruefen(ctx: Context, grund: String) {
         val sp = Speicher(ctx)
         val grundSoll = soll(sp)
+        try {
+            schalten(ctx, sp, grund, grundSoll)
+        } catch (e: Exception) {
+            sp.notieren("Prüfung abgebrochen: ${e.message ?: e.javaClass.simpleName}")
+        } finally {
+            // Der nächste Wecker steht, auch wenn das Schalten schiefging.
+            planen(ctx, sp, grundSoll)
+            Kachel.auffrischen(ctx)
+        }
+    }
+
+    private fun schalten(ctx: Context, sp: Speicher, grund: String, grundSoll: Boolean?) {
         var soll = grundSoll
         var warum = grund
         if (grundSoll == true && zuhauseZaehlt(sp)) {
@@ -50,26 +63,27 @@ object Planer {
             }
         }
         UsbDienst.abgleichen(ctx)
-        // Zuhause muss der Wächter weiter nachsehen, sonst merkt er das Weggehen nicht.
-        planen(ctx, sp, if (grundSoll == true) true else soll)
     }
 
-    private fun planen(ctx: Context, sp: Speicher, soll: Boolean?) {
+    // grundSoll, nicht das Ergebnis: zuhause muss der Wächter weiter nachsehen,
+    // sonst merkt er das Weggehen nicht.
+    private fun planen(ctx: Context, sp: Speicher, grundSoll: Boolean?) {
         val am = ctx.getSystemService(AlarmManager::class.java)
         val pi = PendingIntent.getBroadcast(
             ctx, 1, Intent(ctx, Wecker::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val jetzt = LocalDateTime.now()
-        val ziele = mutableListOf<LocalDateTime>()
-        naechsteGrenze(sp, jetzt)?.let { ziele += it }
-        if (soll == true) ziele += jetzt.plusMinutes(sp.waechter.toLong())
-        val ziel = ziele.minOrNull()
+        val jetzt = Instant.now()
+        val zone = ZoneId.systemDefault()
+        val ziel = Regeln.wecker(
+            jetzt, zone, naechsteGrenze(sp, LocalDateTime.ofInstant(jetzt, zone)),
+            if (grundSoll == true) sp.waechter.toLong() else null,
+        )
         if (ziel == null) {
             am.cancel(pi)
             return
         }
-        val ms = ziel.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val ms = ziel.toEpochMilli()
         if (am.canScheduleExactAlarms()) {
             am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, ms, pi)
         } else {
@@ -88,13 +102,23 @@ class Wecker : BroadcastReceiver() {
 }
 
 class Systemstart : BroadcastReceiver() {
+    private val erwartet = setOf(
+        Intent.ACTION_BOOT_COMPLETED,
+        Intent.ACTION_MY_PACKAGE_REPLACED,
+        AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED,
+        Intent.ACTION_TIME_CHANGED,
+        Intent.ACTION_TIMEZONE_CHANGED,
+    )
+
     override fun onReceive(ctx: Context, intent: Intent) {
+        // Exportiert: gezielt schicken kann hierher jede App, nur diese Meldungen nicht.
+        if (intent.action !in erwartet) return
         val r = goAsync()
         Thread {
             try {
                 // Nach dem Hochfahren braucht das Mobilfunknetz einen Moment.
                 if (intent.action?.endsWith("BOOT_COMPLETED") == true) Thread.sleep(20_000)
-                Planer.pruefen(ctx, "Gerätestart")
+                Planer.pruefen(ctx, if (intent.action == Intent.ACTION_BOOT_COMPLETED) "Gerätestart" else "System")
             } finally { r.finish() }
         }.start()
     }

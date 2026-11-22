@@ -1,7 +1,10 @@
 package de.jonasgroll.spotr
 
+import android.content.ComponentName
+import android.content.Context
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
+import android.util.Log
 
 /** Kachel in den Schnelleinstellungen: Hotspot an oder aus, ohne die App zu öffnen. */
 class Kachel : TileService() {
@@ -23,6 +26,14 @@ class Kachel : TileService() {
             Thread.sleep(1500)
             zeigen(Hotspot.istAn(this))
         }.start()
+    }
+
+    companion object {
+        /** Eine aktive Kachel zeigt erst Neues, wenn die App darum bittet. */
+        fun auffrischen(ctx: Context) {
+            runCatching { requestListeningState(ctx, ComponentName(ctx, Kachel::class.java)) }
+                .onFailure { Log.w("Spotr", "Kachel nicht aufgefrischt", it) }
+        }
     }
 
     private fun zeigen(an: Boolean) {

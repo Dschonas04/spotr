@@ -1,40 +1,70 @@
-# Spotr
+<p align="center"><img src="docs/logo.svg" width="76" alt=""></p>
+<h1 align="center">Spotr</h1>
+<p align="center">Macht ein Android-Handy zum zuverlässigen Hotspot. Ohne Server, ohne Konto, ohne Internetzugriff der App.</p>
 
-Android-App, die das Handy zum reinen Hotspot macht. Läuft komplett auf dem Gerät, ohne Server, ohne Konto, ohne Internetzugriff der App selbst.
+## Was es kann
 
-- Hotspot an/aus per Knopf oder Kachel in den Schnelleinstellungen
-- Betrieb: **Manuell**, **Immer an** (Wächter schaltet ihn wieder ein) oder **Zeitplan** (Zeitfenster je Wochentag, auch über Mitternacht)
-- **Zuhause aus**: im Umkreis der gespeicherten Wohnung bleibt der Hotspot aus, unterwegs geht er an (Standort über Funkzellen und WLAN-Suche, kein Dauer-GPS; zuhause ab Umkreis, unterwegs erst ab doppeltem Umkreis)
-- **USB-Tethering**: per Knopf oder automatisch, sobald ein Rechner am Kabel hängt (nicht zuhause, wenn „Zuhause aus“ an ist). Das S21 kann nur RNDIS: Windows und Linux ja, macOS nein (NCM per `tether_force_usb_functions` startet auf dem S21 nicht)
-- Startet nach dem Hochfahren von selbst
-- Mobile Daten heute und im Monat, Protokoll der Schaltvorgänge
+| Bereich | Funktionen |
+|---|---|
+| Schalten | per Knopf, per Kachel in den Schnelleinstellungen, per adb |
+| Betrieb | **Manuell**, **Immer an** mit Wächter oder **Zeitplan** je Wochentag, auch über Mitternacht |
+| Zuhause aus | im Umkreis der Wohnung bleibt der Hotspot aus, unterwegs geht er an |
+| USB-Tethering | per Knopf oder von selbst, sobald ein Rechner am Kabel hängt |
+| Überblick | mobile Daten heute und im Monat, Protokoll der Schaltvorgänge |
+
+Spotr startet nach dem Hochfahren von selbst. Der Standort kommt sparsam aus
+Funkzellen und WLAN-Suche und bleibt auf dem Gerät: die App hat keine
+Internet-Berechtigung.
 
 ## Bauen und installieren
 
-    ./bauen.sh                      # APK nach ausgabe/spotr-debug.apk (Bau im Container auf 10.0.2.7)
-    adb install -r ausgabe/spotr-debug.apk
+Mit JDK 17 und Android SDK 36:
 
-Rechte einmalig (alternativ in der App antippen):
+```bash
+./gradlew testDebugUnitTest assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
 
-    P=de.jonasgroll.spotr
-    adb shell appops set $P WRITE_SETTINGS allow
-    adb shell appops set $P SCHEDULE_EXACT_ALARM allow
-    adb shell appops set $P GET_USAGE_STATS allow
-    adb shell dumpsys deviceidle whitelist +$P
+Oder im Container auf einem Docker-Host: `BAUHOST=benutzer@host ./bauen.sh`
+(braucht dort ein Abbild mit Android SDK namens `nexora-android:1`).
 
-## Steuerung per adb
+Rechte einmalig, alternativ in der App antippen:
 
-    adb shell am broadcast -f 0x20 -n de.jonasgroll.spotr/.Steuerung --ez an true    # einschalten
-    adb shell am broadcast -f 0x20 -n de.jonasgroll.spotr/.Steuerung --ez an false   # ausschalten
-    adb shell am broadcast -f 0x20 -n de.jonasgroll.spotr/.Steuerung --es betrieb immer   # manuell|immer|zeitplan
-    adb shell am broadcast -f 0x20 -n de.jonasgroll.spotr/.Steuerung --ez zuhause_hier true   # jetziger Ort = Zuhause
-    adb shell am broadcast -f 0x20 -n de.jonasgroll.spotr/.Steuerung --ez zuhause false        # Zuhause aus abschalten
-    adb shell am broadcast -f 0x20 -n de.jonasgroll.spotr/.Steuerung --ez usb true            # USB-Tethering an
-    adb shell am broadcast -f 0x20 -n de.jonasgroll.spotr/.Steuerung --ez usb_auto true       # USB automatisch beim Einstecken
-    adb shell am broadcast -f 0x20 -n de.jonasgroll.spotr/.Steuerung                 # Zustand: result=1 an, 0 aus
+```bash
+P=de.jonasgroll.spotr
+adb shell appops set $P WRITE_SETTINGS allow
+adb shell appops set $P SCHEDULE_EXACT_ALARM allow
+adb shell appops set $P GET_USAGE_STATS allow
+adb shell dumpsys deviceidle whitelist +$P
+```
+
+## Steuern per adb
+
+```bash
+Z="adb shell am broadcast -f 0x20 -n de.jonasgroll.spotr/.Steuerung"
+$Z                              # Zustand: result=1 an, 0 aus
+$Z --ez an true                 # einschalten, false schaltet aus
+$Z --es betrieb immer           # manuell | immer | zeitplan
+$Z --ez zuhause_hier true       # jetziger Ort ist Zuhause
+$Z --ez zuhause false           # "Zuhause aus" abschalten
+$Z --ez usb true                # USB-Tethering an
+$Z --ez usb_auto true           # USB von selbst beim Einstecken
+```
 
 Der Empfänger verlangt die Berechtigung DUMP, die nur System und adb-Shell haben.
 
 ## Wie das Schalten geht
 
-Android lässt Apps mit „Systemeinstellungen ändern“ (WRITE_SETTINGS) das Tethering über den TetheringManager starten. Die Methoden sind nicht öffentlich, Spotr ruft sie per Reflection auf (HiddenApiBypass). Getestet auf Galaxy S21, Android 15 / One UI 7.
+Apps mit "Systemeinstellungen ändern" (WRITE_SETTINGS) dürfen Tethering über den
+TetheringManager starten. Die Methoden sind nicht öffentlich, Spotr ruft sie per
+Reflection auf (HiddenApiBypass).
+
+## Grenzen
+
+* Getestet auf einem Galaxy S21 mit Android 15 und One UI 7, andere Geräte können anders schalten.
+* Das S21 kann über USB nur RNDIS: Windows und Linux ja, macOS nein.
+* Nicht für den Play Store: der nutzt keine versteckten Schnittstellen.
+
+## Lizenz
+
+MIT, siehe [LICENSE](LICENSE).

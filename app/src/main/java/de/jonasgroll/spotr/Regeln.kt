@@ -1,6 +1,8 @@
 package de.jonasgroll.spotr
 
+import java.time.Instant
 import java.time.LocalDateTime
+import java.time.ZoneId
 
 /** Reine Regeln ohne Android, damit sie sich ohne Gerät testen lassen. */
 object Regeln {
@@ -31,6 +33,25 @@ object Regeln {
             punkte.map { d.atTime(it / 60, it % 60) }.firstOrNull { it.isAfter(jetzt) }?.let { return it }
         }
         return null
+    }
+
+    /**
+     * Der Zeitpunkt für den Wecker: der Wächter in echten Minuten, die Grenze des
+     * Plans nach der Uhr an der Wand, beides immer in der Zukunft. Bei der
+     * Umstellung auf Winterzeit gibt es eine Stunde zweimal, und atZone nimmt die
+     * erste: in der zweiten läge der Wecker sonst hinter uns und löste sofort
+     * wieder aus.
+     */
+    fun wecker(jetzt: Instant, zone: ZoneId, grenze: LocalDateTime?, waechterMinuten: Long?): Instant? {
+        val ziele = mutableListOf<Instant>()
+        if (waechterMinuten != null) ziele += jetzt.plusSeconds(maxOf(1L, waechterMinuten) * 60)
+        if (grenze != null) {
+            val kommend = zone.rules.getValidOffsets(grenze).map { grenze.toInstant(it) }
+                .ifEmpty { listOf(grenze.atZone(zone).toInstant()) }
+                .filter { it.isAfter(jetzt) }
+            ziele += kommend.minOrNull() ?: jetzt.plusSeconds(60)
+        }
+        return ziele.minOrNull()
     }
 
     /**

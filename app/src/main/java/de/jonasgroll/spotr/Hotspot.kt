@@ -49,8 +49,8 @@ object Hotspot {
         if (!darfSchalten(ctx)) return "Spotr darf die Systemeinstellungen nicht ändern"
         val tm = ctx.applicationContext.getSystemService("tethering")
             ?: return "Tethering wird nicht unterstützt"
-        val klasse = Class.forName("android.net.TetheringManager")
         return try {
+            val klasse = Class.forName("android.net.TetheringManager")
             if (!an) {
                 klasse.getMethod("stopTethering", Int::class.javaPrimitiveType).invoke(tm, typ)
                 return null

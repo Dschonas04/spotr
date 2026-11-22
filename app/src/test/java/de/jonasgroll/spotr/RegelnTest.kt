@@ -71,4 +71,31 @@ class RegelnTest {
         assertEquals("Sa und So, 10:00 bis 12:00", Fenster(setOf(6, 7), 600, 720).text())
         assertEquals("Mo, Mi, 10:00 bis 12:00", Fenster(setOf(3, 1), 600, 720).text())
     }
+
+    private val berlin = java.time.ZoneId.of("Europe/Berlin")
+
+    @org.junit.Test
+    fun waechterInDerDoppeltenStunde() {
+        val jetzt = java.time.Instant.parse("2026-10-25T01:10:00Z") // 02:10, zum zweiten Mal
+        org.junit.Assert.assertEquals(jetzt.plusSeconds(300), Regeln.wecker(jetzt, berlin, null, 5))
+    }
+
+    @org.junit.Test
+    fun grenzeInDerDoppeltenStunde() {
+        val jetzt = java.time.Instant.parse("2026-10-25T01:10:00Z")
+        val grenze = LocalDateTime.of(2026, 10, 25, 2, 30)
+        org.junit.Assert.assertEquals(java.time.Instant.parse("2026-10-25T01:30:00Z"), Regeln.wecker(jetzt, berlin, grenze, null))
+    }
+
+    @org.junit.Test
+    fun grenzeInDerFehlendenStunde() {
+        val jetzt = java.time.Instant.parse("2027-03-28T00:50:00Z") // 01:50, gleich ist es 03:00
+        val grenze = LocalDateTime.of(2027, 3, 28, 2, 30)
+        org.junit.Assert.assertEquals(java.time.Instant.parse("2027-03-28T01:30:00Z"), Regeln.wecker(jetzt, berlin, grenze, null))
+    }
+
+    @org.junit.Test
+    fun ohneZielKeinWecker() {
+        org.junit.Assert.assertNull(Regeln.wecker(java.time.Instant.now(), berlin, null, null))
+    }
 }
