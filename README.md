@@ -2,6 +2,14 @@
 <h1 align="center">Spotr</h1>
 <p align="center">Macht ein Android-Handy zum zuverlässigen Hotspot. Ohne Server, ohne Konto, ohne Internetzugriff der App.</p>
 
+<p align="center">
+
+[![prüfen](https://github.com/Dschonas04/spotr/actions/workflows/pruefen.yml/badge.svg)](https://github.com/Dschonas04/spotr/actions/workflows/pruefen.yml)
+[![Android](https://img.shields.io/badge/Android-Kotlin-3DDC84)](https://developer.android.com)
+[![Lizenz: MIT](https://img.shields.io/badge/Lizenz-MIT-blue.svg)](LICENSE)
+
+</p>
+
 ## Was es kann
 
 | Bereich | Funktionen |
